@@ -7,16 +7,16 @@ const server = http.createServer(app);
 const io = new Server(server);
 
 // --- 遊戲設定常量 ---
-const GRID_SIZE = 10;
-const MINE_COUNT_PER_PLAYER = 3;
-const HIGHLAND_CELL_COUNT = 30;
-const WORMHOLE_COUNT = 4;
-const STAIRWAY_COUNT = 4;
+const GRID_SIZE = 12;
+const MINE_COUNT_PER_PLAYER = 4;
+const HIGHLAND_CELL_COUNT = 40;
+const WORMHOLE_COUNT = 5;
+const STAIRWAY_COUNT = 5;
 const INITIAL_CARDS = 4;
 
 const CARDS = {
     'Double Jeopardy': { name: "雙重危機", type: "attack", description: "對手下回合必須踩兩個格子", immediate: true },
-    'Blackout': { name: "黑暗視野", type: "attack", description: "對手下回合視野將被黑暗籠罩，無法進行任何操作", immediate: true },
+    'Blackout': { name: "黑暗視野", type: "attack", description: "使對手的下個回合在完全黑暗中進行", immediate: true },
     'Shield': { name: "護盾", type: "support", description: "抵銷下一次踩到的地雷，使用後結束本回合", immediate: true },
     'Premonition': { name: "神之預感", type: "support", description: "安全地查看一個格子的內容 (使用後本回合可繼續行動)", target: "cell" },
     'Relocate': { name: "轉移陣地", type: "support", description: "清除自己的一個標記，並重新佔領一個格子，之後結束本回合", target: "own_cell" },
@@ -27,30 +27,24 @@ const CARDS = {
 const CARD_DECK = Object.keys(CARDS);
 const CARDS_THAT_END_TURN_IMMEDIATELY = ['Shield', 'Skip', 'Double Jeopardy', 'Blackout'];
 
-// --- 伺服器狀態 ---
 app.use(express.static('public'));
 let gameRooms = {};
 
-// --- 輔助函數 ---
 function broadcastState(roomId, state) {
     if (gameRooms[roomId]) {
         io.to(roomId).emit('gameStateUpdate', state);
     }
 }
 
-// --- Socket.IO 連線處理 ---
 io.on('connection', (socket) => {
     console.log(`一個玩家已連接: ${socket.id}`);
-
     let roomId = Object.keys(gameRooms).find(id => gameRooms[id] && gameRooms[id].players.length === 1 && !gameRooms[id].isFull);
-
     if (roomId) {
         const room = gameRooms[roomId];
         room.players.push({ id: socket.id, role: 'B' });
         room.isFull = true;
         socket.join(roomId);
         console.log(`玩家 ${socket.id} 加入房間 ${roomId} (玩家 B)`);
-
         room.state = createNewGameState();
         io.to(roomId).emit('gameStart', {
             state: room.state,
@@ -67,17 +61,14 @@ io.on('connection', (socket) => {
         console.log(`玩家 ${socket.id} 建立房間 ${roomId} (玩家 A)`);
         socket.emit('waitingForOpponent');
     }
-
     socket.data.roomId = roomId;
 
     socket.on('playerAction', (action) => {
         const currentRoomId = socket.data.roomId;
         const room = gameRooms[currentRoomId];
         if (!room || !room.state || room.state.isProcessing) return;
-
         const player = room.players.find(p => p.id === socket.id);
         if (!player) return;
-
         handlePlayerAction(currentRoomId, player.role, action);
     });
 
@@ -85,7 +76,6 @@ io.on('connection', (socket) => {
         const currentRoomId = socket.data.roomId;
         const room = gameRooms[currentRoomId];
         if (!room || room.players.length < 2) return;
-        
         room.state = createNewGameState();
         io.to(currentRoomId).emit('gameStart', {
             state: room.state,
@@ -104,16 +94,11 @@ io.on('connection', (socket) => {
     });
 });
 
-// --- 核心遊戲邏輯函數 ---
-
 function handlePlayerAction(roomId, playerRole, action) {
     const state = gameRooms[roomId].state;
-    if (state.isProcessing || state.gameState === 'GAMEOVER' || state.gameState === 'TIE' || state.turn !== playerRole) {
-        return;
-    }
+    if (state.isProcessing || state.gameState === 'GAMEOVER' || state.gameState === 'TIE' || state.turn !== playerRole) return;
     state.isProcessing = true;
     state.prompt = null;
-
     try {
         switch (action.type) {
             case 'cellClick':
@@ -130,7 +115,6 @@ function handlePlayerAction(roomId, playerRole, action) {
     } catch (error) {
         console.error("伺服器處理操作時出錯:", error);
     } finally {
-        // 蟲洞是特殊異步操作，它會自己解除鎖定
         if (!state.isWormholeActive) {
             state.isProcessing = false;
         }
@@ -157,21 +141,28 @@ function onCardPlay(state, player, cardName) {
     const cardIndex = state.players[player].hand.indexOf(cardName);
     if (cardIndex === -1) return;
     state.players[player].hand.splice(cardIndex, 1);
-    
     const card = CARDS[cardName];
     if (card.immediate) {
         executeImmediateCard(state, player, cardName);
         if (CARDS_THAT_END_TURN_IMMEDIATELY.includes(cardName)) {
-             endTurn(state);
+            if (state.blackoutFor === state.turn) {
+                state.blackoutFor = null;
+            }
+            endTurn(state);
         }
     } else {
-        state.actionState = { type: 'targeting', card: cardName, player: player, message: `玩家 ${player} 使用 ${card.name}，請選擇目標` };
+        state.actionState = {
+            type: 'targeting',
+            card: cardName,
+            player: player,
+            message: `玩家 ${player} 使用 ${card.name}，請選擇目標`
+        };
     }
 }
 
 function executeImmediateCard(state, player, cardName) {
     const opponent = player === 'A' ? 'B' : 'A';
-    switch(cardName) {
+    switch (cardName) {
         case 'Shield':
             state.players[player].shield++;
             state.prompt = `玩家 ${player} 獲得了護盾！`;
@@ -183,8 +174,8 @@ function executeImmediateCard(state, player, cardName) {
             const mines = state.board.filter(c => !c.isRevealed && c.isMine);
             const safe = state.board.filter(c => !c.isRevealed && !c.isMine && !c.isWormhole && !c.isStairway);
             if (mines.length > 0 && safe.length > 0) {
-                const mineToMove = mines[0];
-                const safeToSwap = safe[0];
+                const mineToMove = mines[Math.floor(Math.random() * mines.length)];
+                const safeToSwap = safe[Math.floor(Math.random() * safe.length)];
                 mineToMove.isMine = false;
                 safeToSwap.isMine = true;
                 state.prompt = "地雷位置已暗中改變！";
@@ -197,7 +188,6 @@ function executeImmediateCard(state, player, cardName) {
             state.prompt = `玩家 ${opponent} 下回合將面臨雙重危機！`;
             break;
         case 'Blackout':
-            state.prompt = `黑暗壟罩！玩家 ${opponent} 的下個回合將被跳過！`;
             state.blackoutFor = opponent;
             break;
     }
@@ -206,8 +196,7 @@ function executeImmediateCard(state, player, cardName) {
 function handleCardTarget(state, targetCell) {
     const { card, player } = state.actionState;
     const resetAction = () => { state.actionState = { type: 'none' }; };
-
-    switch(card) {
+    switch (card) {
         case 'Premonition':
             const isDangerous = targetCell.isMine || targetCell.isWormhole;
             state.prompt = `預感：該格...${isDangerous ? '非常危險' : '似乎安全'}。`;
@@ -227,7 +216,11 @@ function handleCardTarget(state, targetCell) {
             if (targetCell.isRevealed && targetCell.revealedBy === player) {
                 targetCell.isRevealed = false;
                 targetCell.revealedBy = null;
-                state.actionState = { type: 'relocating', player: player, message: `玩家 ${player} 請選擇新位置部署` };
+                state.actionState = {
+                    type: 'relocating',
+                    player: player,
+                    message: `玩家 ${player} 請選擇新位置部署`
+                };
             } else {
                 state.prompt = "只能選擇自己的標記！";
                 resetAction();
@@ -242,8 +235,7 @@ function handleRelocateStep2(state, targetCell) {
         state.actionState.message = `玩家 ${state.turn} 請選擇一個未揭示的格子部署`;
         return;
     }
-    targetCell.isRevealed = true;
-    targetCell.revealedBy = state.turn;
+    setRevealed(targetCell, state.turn);
     state.prompt = `玩家 ${state.turn} 已成功轉移陣地！`;
     endTurn(state);
 }
@@ -254,8 +246,10 @@ const setRevealed = (cell, by) => {
 };
 
 function stepOnCell(state, cell) {
-    if (cell.isWormhole) { handleWormhole(state, cell); return; }
-    
+    if (cell.isWormhole) {
+        handleWormhole(state, cell);
+        return;
+    }
     if (cell.isMine) {
         if (state.players[state.turn].shield > 0) {
             state.players[state.turn].shield--;
@@ -273,7 +267,9 @@ function stepOnCell(state, cell) {
         processStepCompletion(state);
     } else {
         setRevealed(cell, state.turn);
-        if (cell.isStairway) { state.prompt = `通過樓梯前往${cell.layer === 'ground' ? '高地' : '地面'}！`; }
+        if (cell.isStairway) {
+            state.prompt = `通過樓梯前往${cell.layer === 'ground' ? '高地' : '地面'}！`;
+        }
         processStepCompletion(state);
     }
     checkTieCondition(state);
@@ -284,16 +280,13 @@ function handleWormhole(state, cell) {
     drawCard(state, state.turn);
     state.prompt = '你勇敢地跳入蟲洞，並獲得了一張新卡牌作為獎勵！';
     state.isWormholeActive = true;
-    
     const roomId = Object.keys(gameRooms).find(id => gameRooms[id] && gameRooms[id].state === state);
     if (!roomId) {
         state.isWormholeActive = false;
         state.isProcessing = false;
         return;
     }
-
     broadcastState(roomId, state);
-
     setTimeout(() => {
         const unrevealed = state.board.filter(c => !c.isRevealed && c.id !== cell.id);
         if (unrevealed.length > 0) {
@@ -327,6 +320,9 @@ function landOnCell(state, cell) {
 }
 
 function processStepCompletion(state) {
+    if (state.blackoutFor === state.turn) {
+        state.blackoutFor = null;
+    }
     if (state.doubleJeopardyState.active && state.doubleJeopardyState.player === state.turn) {
         state.doubleJeopardyState.steps--;
         if (state.doubleJeopardyState.steps <= 0) {
@@ -343,18 +339,14 @@ function processStepCompletion(state) {
 function endTurn(state) {
     state.actionState = { type: 'none' };
     state.turn = (state.turn === 'A') ? 'B' : 'A';
-
-    if (state.blackoutFor === state.turn) {
-        state.prompt = `玩家 ${state.turn} 因黑暗壟罩，回合被跳過！`;
-        state.blackoutFor = null;
-        endTurn(state);
-    }
 }
 
 function gameOver(state, winner) {
     state.gameState = 'GAMEOVER';
     state.turn = winner;
-    state.board.forEach(cell => { if (cell.isMine) setRevealed(cell, 'mine'); });
+    state.board.forEach(cell => {
+        if (cell.isMine) setRevealed(cell, 'mine');
+    });
 }
 
 function checkTieCondition(state) {
@@ -381,8 +373,16 @@ function createNewGameState() {
         blackoutFor: null,
         minePlacementCount: 0,
         board: Array(GRID_SIZE * GRID_SIZE).fill().map((_, i) => ({
-            id: i, layer: 'ground', isMine: false, isWormhole: false, isDecoy: false,
-            isStairway: false, isRevealed: false, revealedBy: null
+            id: i,
+            row: Math.floor(i / GRID_SIZE),
+            col: i % GRID_SIZE,
+            layer: 'ground',
+            isMine: false,
+            isWormhole: false,
+            isDecoy: false,
+            isStairway: false,
+            isRevealed: false,
+            revealedBy: null
         })),
         players: { A: { hand: [], shield: 0 }, B: { hand: [], shield: 0 } },
         prompt: null,
@@ -392,12 +392,10 @@ function createNewGameState() {
     shuffled.slice(0, HIGHLAND_CELL_COUNT).forEach(c => c.layer = 'highland');
     
     const potentialStairwayCells = state.board.filter(c => c.layer === 'ground' || c.layer === 'highland');
-    const shuffledStairs = potentialStairwayCells.sort(() => 0.5 - Math.random());
-    shuffledStairs.slice(0, STAIRWAY_COUNT).forEach(c => c.isStairway = true);
+    potentialStairwayCells.sort(() => 0.5 - Math.random()).slice(0, STAIRWAY_COUNT).forEach(c => c.isStairway = true);
 
     const potentialWormholeCells = state.board.filter(c => !c.isStairway);
-    const shuffledWormholes = potentialWormholeCells.sort(() => 0.5 - Math.random());
-    shuffledWormholes.slice(0, WORMHOLE_COUNT).forEach(c => c.isWormhole = true);
+    potentialWormholeCells.sort(() => 0.5 - Math.random()).slice(0, WORMHOLE_COUNT).forEach(c => c.isWormhole = true);
     
     for (let i = 0; i < INITIAL_CARDS; i++) {
         drawCard(state, "A");

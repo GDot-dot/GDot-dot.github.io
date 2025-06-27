@@ -52,7 +52,9 @@
         }
         #view-toggle-btn:hover { background: #eceff1; }
         .game-board {
-            display: grid; grid-template-columns: repeat(10, 45px); grid-template-rows: repeat(10, 45px);
+            display: grid;
+            grid-template-columns: repeat(12, 45px);
+            grid-template-rows: repeat(12, 45px);
             gap: 4px; border: 2px solid #ccc; padding: 5px; background-color: var(--board-bg);
         }
         #highland-board { display: none; }
@@ -62,7 +64,10 @@
             background-color: rgba(10, 10, 25, 0.5);
             pointer-events: auto;
         }
-        #blackout-overlay { background-color: rgba(10, 10, 25, 0.98); }
+        #blackout-overlay {
+            background-color: rgba(10, 10, 25, 0.98);
+            pointer-events: none;
+        }
         .cell {
             width: 45px; height: 45px; background-color: var(--cell-bg);
             border: 2px solid; border-color: #fff #888 #888 #fff;
@@ -120,10 +125,10 @@
 
     <script src="/socket.io/socket.io.js"></script>
     <script>
-        const groundBoardEl = document.getElementById('ground-board'), highlandBoardEl = document.getElementById('highland-board'), statusBar = document.getElementById('status-bar'), viewToggleBtn = document.getElementById('view-toggle-btn'), restartButton = document.getElementById('restart-button'), handA = document.getElementById('player-a-hand'), handB = document.getElementById('player-b-hand'), promptOverlay = document.getElementById('prompt-overlay'), promptText = document.getElementById('prompt-text'), processingOverlay = document.getElementById('processing-overlay'), blackoutOverlay = document.getElementById('blackout-overlay'), mainContent = document.getElementById('main-content'), playerAYou = document.getElementById('player-a-you'), playerBYou = document.getElementById('player-b-you');
+        const groundBoardEl = document.getElementById('ground-board'), highlandBoardEl = document.getElementById('highland-board'), statusBar = document.getElementById('status-bar'), viewToggleBtn = document.getElementById('view-toggle-btn'), restartButton = document.getElementById('restart-button'), handA = document.getElementById('player-a-hand'), handB = document.getElementById('player-b-hand'), promptOverlay = document.getElementById('prompt-overlay'), promptText = document.getElementById('prompt-text'), processingOverlay = document.getElementById('processing-overlay'), blackoutOverlay = document.getElementById('blackout-overlay'), mainContent = document.getElementById('main-content'), playerAYou = document.getElementById('player-a-you'), playerBYou = document.getElementById('player-b-you'), boardArea = document.getElementById('board-area');
         const socket = io();
         let myRole = null, currentGameState = null, currentViewLayer = 'ground';
-        const CARDS_INFO = { 'Double Jeopardy': { name: "雙重危機", type: "attack", description: "對手下回合必須踩兩個格子" }, 'Blackout': { name: "黑暗視野", type: "attack", description: "對手下回合視野將被黑暗籠罩，無法進行任何操作" }, 'Shield': { name: "護盾", type: "support", description: "抵銷下一次踩到的地雷，使用後結束本回合" }, 'Premonition': { name: "神之預感", type: "support", description: "安全地查看一個格子的內容 (使用後本回合可繼續行動)" }, 'Relocate': { name: "轉移陣地", type: "support", description: "清除自己的一個標記，並重新佔領一個格子，之後結束本回合" }, 'Skip': { name: "跳過回合", type: "support", description: "直接結束你的回合" }, 'Mine Shift': { name: "地雷遷移", type: "chaos", description: "隨機一個地雷與一個安全格交換位置 (使用後本回合可繼續行動)" }, 'Decoy': { name: "假情报", type: "chaos", description: "在一個未揭示的格子上放置假地雷，之後結束本回合" } };
+        const CARDS_INFO = { 'Double Jeopardy': { name: "雙重危機", type: "attack", description: "對手下回合必須踩兩個格子" }, 'Blackout': { name: "黑暗視野", type: "attack", description: "使對手的下個回合在完全黑暗中進行" }, 'Shield': { name: "護盾", type: "support", description: "抵銷下一次踩到的地雷，使用後結束本回合" }, 'Premonition': { name: "神之預感", type: "support", description: "安全地查看一個格子的內容 (使用後本回合可繼續行動)" }, 'Relocate': { name: "轉移陣地", type: "support", description: "清除自己的一個標記，並重新佔領一個格子，之後結束本回合" }, 'Skip': { name: "跳過回合", type: "support", description: "直接結束你的回合" }, 'Mine Shift': { name: "地雷遷移", type: "chaos", description: "隨機一個地雷與一個安全格交換位置 (使用後本回合可繼續行動)" }, 'Decoy': { name: "假情报", type: "chaos", description: "在一個未揭示的格子上放置假地雷，之後結束本回合" } };
 
         socket.on('connect', () => { statusBar.textContent = '已連接，等待對手...'; });
         socket.on('waitingForOpponent', () => { statusBar.textContent = '等待對手加入...'; });
@@ -172,25 +177,14 @@
                 if (cellData.isRevealed) {
                     const revealedByClass = cellData.revealedBy ? `revealed-${cellData.revealedBy.toLowerCase()}` : 'revealed-unknown';
                     cellEl.classList.add('revealed', revealedByClass);
-                    
-                    if (cellData.revealedBy === 'mine') {
-                        cellEl.textContent = '💥';
-                        cellEl.classList.add('mine');
-                    } else if (cellData.revealedBy === 'shield') {
-                        cellEl.textContent = '🛡️';
-                    } else if (cellData.isStairway) {
-                        cellEl.textContent = layerName === 'ground' ? '▲' : '▼';
-                    } else {
-                        cellEl.textContent = cellData.revealedBy || '?';
-                    }
+                    if (cellData.revealedBy === 'mine') { cellEl.textContent = '💥'; cellEl.classList.add('mine'); }
+                    else if (cellData.revealedBy === 'shield') { cellEl.textContent = '🛡️'; }
+                    else if (cellData.isStairway) { cellEl.textContent = layerName === 'ground' ? '▲' : '▼'; }
+                    else { cellEl.textContent = cellData.revealedBy || '?'; }
                 } else {
-                    if (cellData.isStairway) {
-                        cellEl.classList.add('stairway');
-                        cellEl.textContent = layerName === 'ground' ? '▲' : '▼';
-                    }
-                    if (cellData.isWormhole) cellEl.classList.add('wormhole');
+                    if (cellData.isStairway) { cellEl.classList.add('stairway'); cellEl.textContent = layerName === 'ground' ? '▲' : '▼'; }
+                    if (cellData.isWormhole) { cellEl.classList.add('wormhole'); }
                 }
-                
                 cellEl.addEventListener('click', () => {
                     if (cellData.layer === currentViewLayer) {
                          socket.emit('playerAction', { type: 'cellClick', payload: { id: cellData.id } });
@@ -208,49 +202,35 @@
                 currentGameState.players[p].hand.forEach(cardName => {
                     const cardData = CARDS_INFO[cardName];
                     const cardBtn = document.createElement('button');
-                    cardBtn.textContent = cardData.name;
-                    cardBtn.title = cardData.description;
+                    cardBtn.textContent = cardData.name; cardBtn.title = cardData.description;
                     cardBtn.className = `card card-${cardData.type}`;
                     cardBtn.disabled = myRole !== p || currentGameState.turn !== p || currentGameState.gameState !== 'TURN' || currentGameState.actionState.type !== 'none' || currentGameState.isProcessing;
-                    cardBtn.onclick = () => {
-                        socket.emit('playerAction', { type: 'playCard', payload: { cardName: cardName } });
-                    };
+                    cardBtn.onclick = () => { socket.emit('playerAction', { type: 'playCard', payload: { cardName: cardName } }); };
                     handEl.appendChild(cardBtn);
-                });
+});
             });
         }
 
         function updateStatus() {
             if (!currentGameState) return;
-            const state = currentGameState;
-            let msg = '';
-            const isMyTurn = state.turn === myRole;
-
+            const state = currentGameState; let msg = ''; const isMyTurn = state.turn === myRole;
             if (state.actionState.type !== 'none') {
                 msg = state.actionState.message;
                 if (state.actionState.player !== myRole) msg += " (等待對手操作...)";
             } else if (state.gameState === 'PLACING') {
-                const remaining = 3 - Math.floor(state.minePlacementCount / 2);
+                const remaining = 4 - Math.floor(state.minePlacementCount / 2); // 修改為新的地雷數
                 msg = `玩家 ${state.turn} 請埋設地雷 (${remaining})`;
                 if (!isMyTurn) msg += " (等待對手操作...)";
             } else if (state.gameState === 'TURN') {
                 msg = `輪到玩家 ${state.turn}`;
-                if (state.doubleJeopardyState.active && state.doubleJeopardyState.player === state.turn) {
-                    msg += ` (雙重危機: 剩 ${state.doubleJeopardyState.steps} 步)`;
-                }
+                if(state.blackoutFor === state.turn) msg += ' (黑暗中...)';
+                if (state.doubleJeopardyState.active && state.doubleJeopardyState.player === state.turn) { msg += ` (雙重危機: 剩 ${state.doubleJeopardyState.steps} 步)`; }
                 if (!isMyTurn) msg += " (等待...)";
-            } else if (state.gameState === 'GAMEOVER') {
-                msg = `遊戲結束！玩家 ${state.turn} 獲勝！`;
-            } else if (state.gameState === 'TIE') {
-                msg = `平手！`;
-            }
-            statusBar.textContent = msg;
-            statusBar.className = 'status-bar';
-            if (state.gameState === 'GAMEOVER' || state.gameState === 'TIE') {
-                statusBar.classList.add('info-turn');
-            } else {
-                statusBar.classList.add(state.turn === 'A' ? 'player-a-turn' : 'player-b-turn');
-            }
+            } else if (state.gameState === 'GAMEOVER') { msg = `遊戲結束！玩家 ${state.turn} 獲勝！`;
+            } else if (state.gameState === 'TIE') { msg = `平手！`; }
+            statusBar.textContent = msg; statusBar.className = 'status-bar';
+            if (state.gameState === 'GAMEOVER' || state.gameState === 'TIE') { statusBar.classList.add('info-turn');
+            } else { statusBar.classList.add(state.turn === 'A' ? 'player-a-turn' : 'player-b-turn'); }
         }
         
         function switchView(layerName) {
@@ -259,10 +239,7 @@
             highlandBoardEl.style.display = (layerName === 'highland') ? 'grid' : 'none';
             viewToggleBtn.textContent = (layerName === 'ground') ? '查看高地層 (H)' : '查看地面層 (G)';
         }
-        function showPrompt(text) {
-            promptText.textContent = text;
-            promptOverlay.style.display = 'flex';
-        }
+        function showPrompt(text) { promptText.textContent = text; promptOverlay.style.display = 'flex'; }
         
         viewToggleBtn.addEventListener('click', () => switchView(currentViewLayer === 'ground' ? 'highland' : 'ground'));
         restartButton.addEventListener('click', () => {
