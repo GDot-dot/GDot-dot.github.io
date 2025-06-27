@@ -1,0 +1,342 @@
+<!-- public/index.html -->
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>雙人對戰踩地雷 - 戰爭迷霧版 (線上版)</title>
+    <!-- 樣式 Style 完全保持不變 -->
+    <style>
+        :root {
+            --player-a-color: #1976d2; --player-b-color: #f57c00;
+            --mine-color: #d32f2f; --safe-color: #43a047;
+            --ui-background: #f0f2f5; --container-bg: white;
+            --board-bg: #e0e0e0; --cell-bg: #bdbdbd;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--ui-background);
+            display: flex; justify-content: center; align-items: center;
+            padding: 20px; box-sizing: border-box;
+        }
+        #game-container {
+            display: flex; flex-direction: column; align-items: center;
+            background-color: var(--container-bg); padding: 25px;
+            border-radius: 15px; box-shadow: 0 8px 25px rgba(0,0,0,0.1);
+        }
+        h1 { color: #1a237e; margin-top: 0; }
+        #status-bar {
+            width: 100%; text-align: center; padding: 12px; margin-bottom: 15px;
+            border-radius: 8px; font-size: 1.3em; font-weight: bold; transition: all 0.3s ease;
+        }
+        .player-a-turn { background-color: var(--player-a-color); color: white; }
+        .player-b-turn { background-color: var(--player-b-color); color: white; }
+        .info-turn { background-color: #6c757d; color: white; }
+        #main-content { display: flex; gap: 20px; align-items: flex-start; }
+        .player-panel { width: 170px; padding: 15px; border-radius: 10px; text-align: center; }
+        #player-a-panel { border: 3px solid var(--player-a-color); }
+        #player-b-panel { border: 3px solid var(--player-b-color); }
+        .player-panel h3 { margin: 0 0 15px 0; }
+        .hand { display: flex; flex-direction: column; gap: 8px; }
+        .card {
+            padding: 10px 8px; border: none; border-radius: 5px; color: white;
+            cursor: pointer; transition: transform 0.2s, box-shadow 0.2s;
+            font-size: 0.9em; width: 100%;
+        }
+        .card:hover:not(:disabled) { transform: scale(1.05); box-shadow: 0 4px 10px rgba(0,0,0,0.2); }
+        .card:disabled { opacity: 0.6; cursor: not-allowed; }
+        .card-attack { background-color: #c62828; } .card-support { background-color: #283593; } .card-chaos { background-color: #6a1b9a; }
+        
+        #board-area { text-align: center; position: relative; /* Needed for overlay */ }
+        #view-controls { margin-bottom: 10px; }
+        #view-toggle-btn {
+            padding: 10px 15px; border-radius: 8px; border: 2px solid #546e7a;
+            background: white; font-size: 1em; cursor: pointer; transition: all 0.2s;
+        }
+        #view-toggle-btn:hover { background: #eceff1; }
+
+        .game-board {
+            display: grid;
+            grid-template-columns: repeat(10, 45px); grid-template-rows: repeat(10, 45px);
+            gap: 4px; border: 2px solid #ccc; padding: 5px; background-color: var(--board-bg);
+        }
+        #highland-board { display: none; }
+
+        #blackout-overlay {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-color: rgba(10, 10, 25, 0.98);
+            pointer-events: none; /* Allows clicks to pass through */
+            z-index: 100;
+            display: none; /* Hidden by default */
+            clip-path: circle(80px at 50% 50%);
+        }
+
+        .cell {
+            width: 45px; height: 45px; background-color: var(--cell-bg);
+            border: 2px solid; border-color: #fff #888 #888 #fff;
+            cursor: pointer; display: flex; justify-content: center; align-items: center;
+            font-size: 1.5em; font-weight: bold; transition: all 0.2s;
+        }
+        .cell.revealed { background-color: var(--board-bg); border-color: #ccc; cursor: default; }
+        .cell.revealed-a { color: var(--player-a-color); } .cell.revealed-b { color: var--player-b-color); }
+        .cell.stairway { background-color: #ffca28; }
+        .cell.wormhole::before { content: '🌀'; font-size: 1.2em; animation: spin 4s linear infinite; }
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+        .cell.mine { background-color: var(--mine-color); }
+
+        #restart-button {
+            margin-top: 20px; padding: 12px 25px; font-size: 1em; border: none;
+            border-radius: 8px; background-color: #1a237e; color: white;
+            cursor: pointer; transition: background-color 0.3s;
+        }
+        #restart-button:hover { background-color: #3f51b5; }
+        
+        #prompt-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.6); display: none;
+            justify-content: center; align-items: center; z-index: 1000;
+        }
+        #prompt-box { background: white; padding: 25px; border-radius: 10px; text-align: center; }
+    </style>
+</head>
+<body>
+    <div id="game-container">
+        <h1>雙人對戰踩地雷 - 線上版</h1>
+        <div id="status-bar">正在連接到伺服器...</div>
+        <div id="main-content" style="display:none;">
+            <div id="player-a-panel" class="player-panel">
+                <h3>A 玩家 <span id="player-a-you"></span></h3>
+                <div id="player-a-hand" class="hand"></div>
+            </div>
+            <div id="board-area">
+                <div id="view-controls">
+                    <button id="view-toggle-btn">切換視圖</button>
+                </div>
+                <div id="ground-board" class="game-board"></div>
+                <div id="highland-board" class="game-board"></div>
+                <div id="blackout-overlay"></div>
+            </div>
+            <div id="player-b-panel" class="player-panel">
+                <h3>B 玩家 <span id="player-b-you"></span></h3>
+                <div id="player-b-hand" class="hand"></div>
+            </div>
+        </div>
+        <button id="restart-button" style="display:none;">重新開始</button>
+    </div>
+
+    <div id="prompt-overlay"><div id="prompt-box"><div id="prompt-text"></div><button onclick="this.parentElement.parentElement.style.display='none'">了解</button></div></div>
+
+    <!-- 引入 Socket.IO 客戶端函式庫 -->
+    <script src="/socket.io/socket.io.js"></script>
+
+    <script>
+        // --- Elements & Client-side State ---
+        const groundBoardEl = document.getElementById('ground-board'), highlandBoardEl = document.getElementById('highland-board'), statusBar = document.getElementById('status-bar'), viewToggleBtn = document.getElementById('view-toggle-btn'), restartButton = document.getElementById('restart-button'), handA = document.getElementById('player-a-hand'), handB = document.getElementById('player-b-hand'), promptOverlay = document.getElementById('prompt-overlay'), promptText = document.getElementById('prompt-text'), boardArea = document.getElementById('board-area'), blackoutOverlay = document.getElementById('blackout-overlay'), mainContent = document.getElementById('main-content');
+        
+        const socket = io();
+        let myPlayerId = null; // 本客戶端是 A 還是 B
+        let currentGameState = null; // 從伺服器接收的遊戲狀態
+        let currentViewLayer = 'ground';
+        let blackoutListener = null;
+
+        const MINE_COUNT_PER_PLAYER = 3; // 僅用於顯示剩餘地雷數
+        const CARDS = { // 僅用於顯示卡牌描述
+            'Double Jeopardy': { name: "雙重危機", type: "attack", description: "對手下回合必須踩兩個格子" },
+            'Blackout': { name: "黑暗視野", type: "attack", description: "對手下回合視野將被黑暗籠罩，只能看見滑鼠周圍的區域" },
+            'Shield': { name: "護盾", type: "support", description: "抵銷下一次踩到的地雷" },
+            'Premonition': { name: "神之預感", type: "support", description: "安全地查看一個格子的內容 (使用後本回合可繼續行動)" },
+            'Relocate': { name: "轉移陣地", type: "support", description: "清除自己的一個標記，並重新踩一個格子" },
+            'Skip': { name: "跳過回合", type: "support", description: "直接結束你的回合" },
+            'Mine Shift': { name: "地雷遷移", type: "chaos", description: "隨機一個地雷與一個安全格交換位置" },
+            'Decoy': { name: "假情報", type: "chaos", description: "在一個未揭示的格子上放置假地雷" }
+        };
+
+        // --- Socket Event Listeners ---
+        socket.on('connect', () => {
+            console.log('已成功連接到伺服器!', socket.id);
+        });
+
+        socket.on('waitingForOpponent', () => {
+            statusBar.textContent = '等待對手加入...';
+            mainContent.style.display = 'none';
+            restartButton.style.display = 'none';
+        });
+
+        socket.on('gameStart', (data) => {
+            console.log('遊戲開始!', data);
+            const playerInfo = data.players.find(p => p === socket.id);
+            const myRole = data.players[0] === socket.id ? 'A' : 'B';
+            myPlayerId = myRole;
+            document.getElementById(`player-${myPlayerId.toLowerCase()}-you`).textContent = '(你)';
+
+            mainContent.style.display = 'flex';
+            restartButton.style.display = 'block';
+            updateGame(data.state);
+        });
+
+        socket.on('gameStateUpdate', (newState) => {
+            console.log('接收到遊戲狀態更新:', newState);
+            updateGame(newState);
+        });
+        
+        socket.on('opponentDisconnected', () => {
+            showPrompt('你的對手已斷線！遊戲結束。');
+            mainContent.style.display = 'none';
+            restartButton.style.display = 'none';
+            statusBar.textContent = '對手已離線';
+        });
+
+        // --- Core Update Function ---
+        function updateGame(state) {
+            currentGameState = state;
+            renderAllLayers();
+            renderHands();
+            updateStatus();
+            
+            if (state.prompt) {
+                showPrompt(state.prompt);
+            }
+            
+            // 處理黑暗視野
+            if (state.blackoutFor === myPlayerId && !blackoutListener) {
+                blackoutOverlay.style.display = 'block';
+                const updateBlackoutView = (e) => {
+                    const rect = boardArea.getBoundingClientRect();
+                    const x = e.clientX - rect.left;
+                    const y = e.clientY - rect.top;
+                    blackoutOverlay.style.clipPath = `circle(80px at ${x}px ${y}px)`;
+                };
+                blackoutListener = updateBlackoutView;
+                boardArea.addEventListener('mousemove', blackoutListener);
+            } else if (state.blackoutFor !== myPlayerId && blackoutListener) {
+                blackoutOverlay.style.display = 'none';
+                boardArea.removeEventListener('mousemove', blackoutListener);
+                blackoutListener = null;
+            }
+        }
+        
+        // --- Rendering Functions (幾乎不變, 只讀取 currentGameState) ---
+        function renderAllLayers() {
+            renderLayer('ground');
+            renderLayer('highland');
+        }
+
+        function renderLayer(layerName) {
+            const boardEl = layerName === 'ground' ? groundBoardEl : highlandBoardEl;
+            boardEl.innerHTML = '';
+            currentGameState.board.filter(c => c.layer === layerName).forEach(cellData => {
+                const cellEl = document.createElement('div');
+                cellEl.classList.add('cell');
+                cellEl.dataset.id = cellData.id;
+                
+                // 完全根據伺服器狀態渲染，客戶端不自己判斷
+                if (cellData.isRevealed) {
+                    cellEl.classList.add('revealed', `revealed-${cellData.revealedBy.toLowerCase()}`);
+                    if (currentGameState.gameState === 'GAMEOVER' && cellData.isMine) {
+                        cellEl.textContent = '💥';
+                        cellEl.classList.add('mine');
+                    } else if (cellData.revealedBy === 'shield') {
+                        cellEl.textContent = '🛡️';
+                    } else if (cellData.isStairway) {
+                        cellEl.textContent = layerName === 'ground' ? '▲' : '▼';
+                    } else {
+                        cellEl.textContent = cellData.revealedBy;
+                    }
+                } else {
+                    if (cellData.isStairway) {
+                        cellEl.classList.add('stairway');
+                        cellEl.textContent = layerName === 'ground' ? '▲' : '▼';
+                    }
+                    if (cellData.isWormhole) cellEl.classList.add('wormhole');
+                }
+                
+                // 點擊事件只發送操作給伺服器
+                cellEl.addEventListener('click', () => {
+                    if (cellData.layer === currentViewLayer) {
+                         socket.emit('cellClick', { id: cellData.id });
+                    }
+                });
+                boardEl.appendChild(cellEl);
+            });
+        }
+        
+        function renderHands() {
+            ['A', 'B'].forEach(p => {
+                const handEl = p === 'A' ? handA : handB;
+                handEl.innerHTML = '';
+                currentGameState.players[p].hand.forEach(cardName => {
+                    const cardData = CARDS[cardName];
+                    const cardBtn = document.createElement('button');
+                    cardBtn.textContent = cardData.name;
+                    cardBtn.title = cardData.description;
+                    cardBtn.classList.add('card', `card-${cardData.type}`);
+                    
+                    // 判斷按鈕是否可用的邏輯
+                    cardBtn.disabled = myPlayerId !== p || currentGameState.turn !== p || currentGameState.gameState !== 'TURN' || currentGameState.actionState.type !== 'none';
+                    
+                    cardBtn.onclick = () => {
+                        socket.emit('playCard', { cardName: cardName });
+                    };
+                    handEl.appendChild(cardBtn);
+                });
+            });
+        }
+
+        function updateStatus() {
+            const state = currentGameState;
+            let msg = '';
+            if (state.actionState.type !== 'none') {
+                msg = state.actionState.message;
+                if (state.actionState.player !== myPlayerId) msg += " (等待對手操作...)";
+            } else if (state.gameState === 'PLACING') {
+                const remaining = MINE_COUNT_PER_PLAYER - Math.floor(state.minePlacementCount / 2);
+                msg = `玩家 ${state.turn} 請埋設地雷 (${remaining})`;
+                if (state.turn !== myPlayerId) msg += " (等待對手操作...)";
+            } else if (state.gameState === 'TURN') {
+                msg = `輪到玩家 ${state.turn}`;
+                if (state.doubleJeopardyState.active && state.doubleJeopardyState.player === state.turn) {
+                    msg += ` (雙重危機: 剩 ${state.doubleJeopardyState.steps} 步)`;
+                }
+                if (state.turn !== myPlayerId) msg += " (等待...)";
+            } else if (state.gameState === 'GAMEOVER') {
+                msg = `遊戲結束！玩家 ${state.turn} 獲勝！`;
+            } else if (state.gameState === 'TIE') {
+                msg = `平手！`;
+            }
+            statusBar.textContent = msg;
+            statusBar.className = 'status-bar';
+            if (state.gameState !== 'GAMEOVER' && state.gameState !== 'TIE') {
+                statusBar.classList.add(state.turn === 'A' ? 'player-a-turn' : 'player-b-turn');
+            } else {
+                statusBar.classList.add('info-turn');
+            }
+        }
+        
+        // --- Utility Functions (幾乎不變) ---
+        function switchView(layerName) {
+            currentViewLayer = layerName;
+            if (layerName === 'ground') {
+                groundBoardEl.style.display = 'grid';
+                highlandBoardEl.style.display = 'none';
+                viewToggleBtn.textContent = '查看高地層 (H)';
+            } else {
+                groundBoardEl.style.display = 'none';
+                highlandBoardEl.style.display = 'grid';
+                viewToggleBtn.textContent = '查看地面層 (G)';
+            }
+        }
+        function showPrompt(text) {
+            promptText.textContent = text;
+            promptOverlay.style.display = 'flex';
+        }
+        
+        viewToggleBtn.addEventListener('click', () => switchView(currentViewLayer === 'ground' ? 'highland' : 'ground'));
+        restartButton.addEventListener('click', () => {
+            if (confirm('確定要重新開始一局嗎？這會重置雙方的遊戲。')) {
+                socket.emit('restartRequest');
+            }
+        });
+    </script>
+</body>
+</html>
