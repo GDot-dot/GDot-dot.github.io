@@ -276,30 +276,48 @@ function stepOnCell(state, cell) {
 }
 
 function handleWormhole(state, cell) {
+    // 1. 先處理即時效果：揭示格子、發牌、設置提示
     setRevealed(cell, state.turn);
     drawCard(state, state.turn);
-    state.prompt = '你勇敢地跳入蟲洞，並獲得了一張新卡牌作為獎勵！';
-    state.isWormholeActive = true;
+    state.prompt = '你勇敢地跳入蟲洞，並獲得了一張新卡牌作為獎勵！正在穿越...';
+    
+    // 2. 鎖定操作狀態
+    state.isWormholeActive = true; 
+    
     const roomId = Object.keys(gameRooms).find(id => gameRooms[id] && gameRooms[id].state === state);
     if (!roomId) {
+        // 如果找不到房間，安全退出
         state.isWormholeActive = false;
         state.isProcessing = false;
         return;
     }
+
+    // 3. ✅ 核心修正：只廣播一次“正在穿越”的中間狀態，讓玩家看到提示和新牌
     broadcastState(roomId, state);
+
+    // 4. 設置延遲，模擬穿越過程
     setTimeout(() => {
         const unrevealed = state.board.filter(c => !c.isRevealed && c.id !== cell.id);
+        
         if (unrevealed.length > 0) {
             const targetCell = unrevealed[Math.floor(Math.random() * unrevealed.length)];
-            landOnCell(state, targetCell);
+            // 5. 在延遲後處理降落邏輯
+            landOnCell(state, targetCell); 
         } else {
+            // 如果沒有地方可降落，直接結束回合
             processStepCompletion(state);
         }
+
+        // 6. 解除鎖定
         state.isWormholeActive = false;
         state.isProcessing = false;
+        
+        // 7. ✅ 核心修正：在所有異步操作完成後，再廣播一次最終的、回合已結束的狀態
         broadcastState(roomId, state);
-    }, 1500);
+
+    }, 2000); // 稍微加長一點延遲，讓體驗更清晰
 }
+
 
 function landOnCell(state, cell) {
     if (cell.isMine) {
